@@ -1,0 +1,80 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Volatility Regime Indicator — Directional Bias
+//
+// Backtested Python equivalent (SPY 2021-2026, 3d hold):
+//   COMPRESSED regime: Sharpe 1.04, WR 48.5%, +0.08%/signal, 196 signals
+//   EXPANDED regime: no edge → HOLD
+//   NORMAL regime: no edge → HOLD
+//
+// Only trades in COMPRESSED regime when RSI hits an extreme (mean reversion).
+// When the market is coiled (volatility compressed), extremes tend to snap back.
+// When vol is expanded or normal, no signal — stand aside.
+
+//@version=6
+
+// REPAINTING FIX 2026-08-06
+// This script previously requested LIVE higher-timeframe series with
+// `lookahead=barmerge.lookahead_on`. On historical bars that returns the
+// completed HTF value -- data that did not exist yet at that moment -- so the
+// indicator looks near-perfect scrolling back and behaves completely
+// differently live. That is why these read as "not showing real data".
+//
+// lookahead_on is only correct when paired with an explicitly CLOSED bar, e.g.
+// request.security(..., 'D', high[1], lookahead=barmerge.lookahead_on), which
+// is what the CPR block in market_guide_suite.pine does. Live series now use
+// the non-repainting default.
+indicator(title='Volatility Regime Indicator', shorttitle='VolRegime+', overlay=true)
+
+// ===== Inputs =====
+res          = input.timeframe(title='Regime Timeframe', defval='D')
+atrFastLen   = input.int(5,   title='ATR Fast Length')
+atrSlowLen   = input.int(20,  title='ATR Slow Length')
+compressTh   = input.float(0.85, title='Compression Threshold (ATR fast/slow)')
+rsiLen       = input.int(14,  title='RSI Length')
+rsiOS        = input.int(40,  title='RSI Oversold (compressed buy)')
+rsiOB        = input.int(60,  title='RSI Overbought (compressed sell)')
+
+// ===== Higher-timeframe source =====
+htfClose = request.security(syminfo.tickerid, res, close)
+htfHigh  = request.security(syminfo.tickerid, res, high)
+htfLow   = request.security(syminfo.tickerid, res, low)
+
+// ===== ATR compression ratio =====
+htfTR    = math.max(htfHigh - htfLow, math.max(math.abs(htfHigh - htfClose[1]), math.abs(htfLow - htfClose[1])))
+atrFast  = ta.rma(htfTR, atrFastLen)
+atrSlow  = ta.rma(htfTR, atrSlowLen)
+atrRatio = atrFast / atrSlow
+
+// ===== RSI =====
+rsi = request.security(syminfo.tickerid, res, ta.rsi(close, rsiLen))
+
+// ===== Regime =====
+isCompressed = atrRatio < compressTh
+isExpanded   = atrRatio > 1.15 // expand threshold from backtest
+isNormal     = not isCompressed and not isExpanded
+
+// ===== Bias logic =====
+buySignal  = isCompressed and rsi < rsiOS
+sellSignal = isCompressed and rsi > rsiOB
+
+// ===== Visual: regime background =====
+bgcolor(isCompressed ? color.new(color.blue, 92) : isExpanded ? color.new(color.red, 94) : na, title='Regime BG')
+
+// ===== Plot entry markers =====
+plotshape(buySignal,  title='BUY',  location=location.belowbar, style=shape.triangleup,   color=color.green, size=size.small)
+plotshape(sellSignal, title='SELL', location=location.abovebar, style=shape.triangledown, color=color.red,   size=size.small)
+
+// ===== Status label =====
+var label regimeLabel = na
+if barstate.islast
+    label.delete(regimeLabel)
+    regimeTxt = isCompressed ? 'COMPRESSED' : isExpanded ? 'EXPANDED' : 'NORMAL'
+    biasTxt = buySignal ? ' → BUY (RSI ' + str.tostring(math.round(rsi)) + ')' :
+              sellSignal ? ' → SELL (RSI ' + str.tostring(math.round(rsi)) + ')' :
+              isCompressed ? ' — HOLD (RSI ' + str.tostring(math.round(rsi)) + ' neutral)' :
+              ' — HOLD (no edge)'
+    regimeLabel := label.new(bar_index, htfClose, regimeTxt + biasTxt, style=label.style_label_down,
+     color=isCompressed ? color.blue : isExpanded ? color.red : color.gray, textcolor=color.white, size=size.small)
+
+alertcondition(buySignal,  title='Compressed BUY',  message='{{ticker}} COMPRESSED + RSI oversold → BUY')
+alertcondition(sellSignal, title='Compressed SELL', message='{{ticker}} COMPRESSED + RSI overbought → SELL')

@@ -1,0 +1,76 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Trend Strength Ribbon
+//
+// Always-on EMA ribbon (8/20/50) that only shows a "confirmed" trend color
+// when the RSI agrees with the stack direction and isn't at an extreme.
+// Distinguishes four states: confirmed trend, extended trend (stretched,
+// be cautious), and no clear trend -- richer than a plain moving-average
+// cross, which says nothing about whether momentum actually backs it.
+
+//@version=6
+
+// REPAINTING FIX 2026-08-06
+// This script previously requested LIVE higher-timeframe series with
+// `lookahead=barmerge.lookahead_on`. On historical bars that returns the
+// completed HTF value -- data that did not exist yet at that moment -- so the
+// indicator looks near-perfect scrolling back and behaves completely
+// differently live. That is why these read as "not showing real data".
+//
+// lookahead_on is only correct when paired with an explicitly CLOSED bar, e.g.
+// request.security(..., 'D', high[1], lookahead=barmerge.lookahead_on), which
+// is what the CPR block in market_guide_suite.pine does. Live series now use
+// the non-repainting default.
+indicator(title='Trend Strength Ribbon', shorttitle='TrendRibbon', overlay=true)
+
+// ===== Inputs =====
+res     = input.timeframe(title='Regime Timeframe', defval='D')
+fastLen = input.int(8,  title='Fast EMA')
+midLen  = input.int(20, title='Mid EMA')
+slowLen = input.int(50, title='Slow EMA')
+rsiLen  = input.int(14, title='RSI Length')
+rsiOB   = input.int(70, title='RSI Overbought (extended)')
+rsiOS   = input.int(30, title='RSI Oversold (extended)')
+
+// ===== Higher-timeframe source =====
+htfClose = request.security(syminfo.tickerid, res, close)
+
+// ===== EMAs =====
+fastEMA = request.security(syminfo.tickerid, res, ta.ema(close, fastLen))
+midEMA  = request.security(syminfo.tickerid, res, ta.ema(close, midLen))
+slowEMA = request.security(syminfo.tickerid, res, ta.ema(close, slowLen))
+
+// ===== RSI confirmation =====
+rsi = request.security(syminfo.tickerid, res, ta.rsi(close, rsiLen))
+
+// ===== Alignment logic =====
+bullStack = fastEMA > midEMA and midEMA > slowEMA and htfClose > fastEMA
+bearStack = fastEMA < midEMA and midEMA < slowEMA and htfClose < fastEMA
+
+confirmedBull = bullStack and rsi > 50 and rsi < rsiOB
+extendedBull  = bullStack and rsi >= rsiOB
+confirmedBear = bearStack and rsi < 50 and rsi > rsiOS
+extendedBear  = bearStack and rsi <= rsiOS
+
+ribbonColor = confirmedBull ? color.new(color.green, 0) :
+              extendedBull  ? color.new(color.lime, 0) :
+              confirmedBear ? color.new(color.red, 0) :
+              extendedBear  ? color.new(color.orange, 0) :
+              color.new(color.gray, 30)
+
+// ===== Plot the ribbon =====
+pf = plot(fastEMA, title='Fast EMA', color=ribbonColor, linewidth=2)
+pm = plot(midEMA,  title='Mid EMA',  color=ribbonColor, linewidth=1)
+ps = plot(slowEMA, title='Slow EMA', color=ribbonColor, linewidth=1)
+fill(pf, ps, color=color.new(ribbonColor, 85), title='Ribbon Fill')
+
+// ===== Status label =====
+var label trendLabel = na
+if barstate.islast
+    label.delete(trendLabel)
+    txt = confirmedBull ? 'STRONG UPTREND' : extendedBull ? 'UPTREND (extended, caution)' :
+          confirmedBear ? 'STRONG DOWNTREND' : extendedBear ? 'DOWNTREND (extended, caution)' :
+          'NO CLEAR TREND'
+    trendLabel := label.new(bar_index, fastEMA, txt, style=label.style_label_down, color=ribbonColor, textcolor=color.white, size=size.small)
+
+alertcondition(confirmedBull and not confirmedBull[1], title='Confirmed Bull Trend', message='{{ticker}} entered a confirmed uptrend (EMA stack + RSI aligned)')
+alertcondition(confirmedBear and not confirmedBear[1], title='Confirmed Bear Trend', message='{{ticker}} entered a confirmed downtrend (EMA stack + RSI aligned)')

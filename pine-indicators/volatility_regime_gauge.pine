@@ -1,0 +1,81 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Volatility Regime Gauge
+//
+// Always-on overlay showing whether the market is COMPRESSED (coiled, cheap
+// premium, watch for expansion) or EXPANDED (already volatile/trending).
+//
+// Quant basis: reuses the exact compression logic already backtested and
+// validated in this project's Gamma_Blast strategy (ATR5/ATR20 < 0.85 =
+// compressed, real backtest PF 3.6 on this signal) plus Bollinger Band
+// width percentile rank (same compression scoring used in the daily
+// watchlist screener). Two independent measures must AGREE before a regime
+// is called, reducing single-metric noise -- this is a guide, not a signal.
+
+//@version=6
+
+// REPAINTING FIX 2026-08-06
+// This script previously requested LIVE higher-timeframe series with
+// `lookahead=barmerge.lookahead_on`. On historical bars that returns the
+// completed HTF value -- data that did not exist yet at that moment -- so the
+// indicator looks near-perfect scrolling back and behaves completely
+// differently live. That is why these read as "not showing real data".
+//
+// lookahead_on is only correct when paired with an explicitly CLOSED bar, e.g.
+// request.security(..., 'D', high[1], lookahead=barmerge.lookahead_on), which
+// is what the CPR block in market_guide_suite.pine does. Live series now use
+// the non-repainting default.
+indicator(title='Volatility Regime Gauge', shorttitle='VolRegime', overlay=true)
+
+// ===== Inputs =====
+res          = input.timeframe(title='Regime Timeframe', defval='D')
+bbLen        = input.int(20, title='BB Length')
+bbMult       = input.float(2.0, title='BB StdDev Mult')
+atrFastLen   = input.int(5,  title='ATR Fast Length')
+atrSlowLen   = input.int(20, title='ATR Slow Length')
+compressTh   = input.float(0.85, title='Compression Threshold (ATR fast/slow)', tooltip='Same threshold validated in Gamma_Blast backtest')
+expandTh     = input.float(1.25, title='Expansion Threshold (ATR fast/slow)')
+pctileLen    = input.int(100, title='BB Width Percentile Lookback')
+
+// ===== Higher-timeframe source data (Daily by default) =====
+htfClose = request.security(syminfo.tickerid, res, close)
+htfHigh  = request.security(syminfo.tickerid, res, high)
+htfLow   = request.security(syminfo.tickerid, res, low)
+
+// ===== Bollinger Band width =====
+basis   = ta.sma(htfClose, bbLen)
+dev     = bbMult * ta.stdev(htfClose, bbLen)
+upperBB = basis + dev
+lowerBB = basis - dev
+bbWidth = (upperBB - lowerBB) / basis
+
+bbWidthPctile = ta.percentrank(bbWidth, pctileLen)
+
+// ===== ATR compression ratio =====
+htfTR   = math.max(htfHigh - htfLow, math.max(math.abs(htfHigh - htfClose[1]), math.abs(htfLow - htfClose[1])))
+atrFast = ta.rma(htfTR, atrFastLen)
+atrSlow = ta.rma(htfTR, atrSlowLen)
+atrRatio = atrFast / atrSlow
+
+// ===== Regime classification (two measures must agree) =====
+isCompressed = atrRatio < compressTh and bbWidthPctile < 25
+isExpanded   = atrRatio > expandTh and bbWidthPctile > 75
+
+regimeColor = isCompressed ? color.new(color.blue, 0) : isExpanded ? color.new(color.red, 0) : color.new(color.gray, 0)
+
+// ===== Plot bands around price, colored by regime =====
+u = plot(upperBB, title='Upper Band', color=regimeColor, linewidth=1)
+l = plot(lowerBB, title='Lower Band', color=regimeColor, linewidth=1)
+fill(u, l, color=color.new(regimeColor, isCompressed ? 85 : isExpanded ? 92 : 95), title='Regime Fill')
+plot(basis, title='Basis', color=color.new(color.white, 40), linewidth=1)
+
+bgcolor(isCompressed ? color.new(color.blue, 90) : na, title='Compression Highlight')
+
+// ===== Status label =====
+var label regimeLabel = na
+if barstate.islast
+    label.delete(regimeLabel)
+    txt = isCompressed ? 'COMPRESSED (coiled)' : isExpanded ? 'EXPANDED (volatile)' : 'NORMAL'
+    regimeLabel := label.new(bar_index, upperBB, txt, style=label.style_label_down, color=regimeColor, textcolor=color.white, size=size.small)
+
+alertcondition(isCompressed and not isCompressed[1], title='Entered Compression', message='Volatility regime just entered COMPRESSION on {{ticker}} -- watch for breakout, premium is cheap')
+alertcondition(isExpanded and not isExpanded[1], title='Entered Expansion', message='Volatility regime just entered EXPANSION on {{ticker}} -- already moving, be cautious chasing')

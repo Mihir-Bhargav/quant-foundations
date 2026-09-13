@@ -1,0 +1,84 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// VWAP Deviation + Volume Confirmation
+//
+// Session-anchored VWAP (the institutional "fair value" reference most prop
+// desks watch) with standard-deviation bands, plus candle coloring that
+// shows whether the current move is backed by real participation (volume)
+// or is thin/unconfirmed. Answers two questions at a glance: is price rich
+// or cheap relative to today's volume-weighted average, and can you trust
+// the move that got it there.
+//
+// KNOWN LIMITATION: needs real volume data. Works well on individual
+// stocks, futures, and NIFTY/BankNifty FUTURES contracts. Will NOT be
+// useful on cash/spot indices (e.g. plain NIFTY50 spot) -- confirmed via
+// real IBKR data pulls in this project that spot index volume reports as
+// zero. Use on stocks/futures, not spot indices.
+
+//@version=6
+indicator(title='VWAP Deviation + Volume Confirmation', shorttitle='VWAP+VolConf', overlay=true)
+
+// ===== Inputs =====
+volAvgLen     = input.int(20, title='Volume Average Length')
+volStrongMult = input.float(1.5, title='Strong Volume Multiplier')
+volWeakMult   = input.float(0.7, title='Weak Volume Multiplier')
+devMult1      = input.float(1.0, title='Inner Band StdDev')
+devMult2      = input.float(2.0, title='Outer Band StdDev')
+
+// ===== Session-anchored VWAP with deviation bands =====
+newSession = ta.change(time('D')) != 0
+
+var float cumPV  = na
+var float cumV   = na
+var float cumPV2 = na
+
+cumPV  := newSession ? (close * volume) : nz(cumPV[1]) + (close * volume)
+cumV   := newSession ? volume : nz(cumV[1]) + volume
+cumPV2 := newSession ? (close * close * volume) : nz(cumPV2[1]) + (close * close * volume)
+
+vwapVal = cumPV / cumV
+variance = (cumPV2 / cumV) - (vwapVal * vwapVal)
+vwapStdev = math.sqrt(math.max(variance, 0))
+
+upperBand1 = vwapVal + devMult1 * vwapStdev
+lowerBand1 = vwapVal - devMult1 * vwapStdev
+upperBand2 = vwapVal + devMult2 * vwapStdev
+lowerBand2 = vwapVal - devMult2 * vwapStdev
+
+// ===== Volume confirmation on the current bar =====
+avgVol    = ta.sma(volume, volAvgLen)
+strongVol = volume > avgVol * volStrongMult
+weakVol   = volume < avgVol * volWeakMult
+
+greenCandle = close > open
+redCandle   = close < open
+
+barColor = strongVol and greenCandle ? color.new(color.lime, 0) :
+           strongVol and redCandle   ? color.new(color.red, 0) :
+           weakVol   and greenCandle ? color.new(color.green, 60) :
+           weakVol   and redCandle   ? color.new(color.maroon, 60) :
+           color.new(color.gray, 30)
+
+barcolor(barColor, title='Volume-Confirmed Bar Color')
+
+// ===== Plot VWAP + bands =====
+vp = plot(vwapVal, title='VWAP', color=color.new(color.yellow, 0), linewidth=2)
+u1 = plot(upperBand1, title='+1 StdDev', color=color.new(color.yellow, 60), linewidth=1)
+l1 = plot(lowerBand1, title='-1 StdDev', color=color.new(color.yellow, 60), linewidth=1)
+u2 = plot(upperBand2, title='+2 StdDev', color=color.new(color.yellow, 80), linewidth=1)
+l2 = plot(lowerBand2, title='-2 StdDev', color=color.new(color.yellow, 80), linewidth=1)
+fill(u1, l1, color=color.new(color.yellow, 92), title='Inner Band Fill')
+fill(u2, u1, color=color.new(color.yellow, 96), title='Outer Upper Fill')
+fill(l1, l2, color=color.new(color.yellow, 96), title='Outer Lower Fill')
+
+// ===== Status label =====
+var label vwapLabel = na
+if barstate.islast
+    label.delete(vwapLabel)
+    devTxt = close > upperBand2 ? 'FAR ABOVE VWAP (+2sd)' : close > upperBand1 ? 'ABOVE VWAP (+1sd)' :
+             close < lowerBand2 ? 'FAR BELOW VWAP (-2sd)' : close < lowerBand1 ? 'BELOW VWAP (-1sd)' :
+             'NEAR VWAP (fair value)'
+    volTxt = strongVol ? ' | STRONG VOLUME' : weakVol ? ' | WEAK VOLUME' : ' | NORMAL VOLUME'
+    vwapLabel := label.new(bar_index, vwapVal, devTxt + volTxt, style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.small)
+
+alertcondition(ta.crossover(close, vwapVal), title='Cross Above VWAP', message='{{ticker}} crossed above VWAP')
+alertcondition(ta.crossunder(close, vwapVal), title='Cross Below VWAP', message='{{ticker}} crossed below VWAP')

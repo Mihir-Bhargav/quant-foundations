@@ -1,0 +1,91 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Trend Ribbon Indicator — Directional Bias
+//
+// Backtested Python equivalent (SPY 2021-2026, 5d hold):
+//   CONFIRMED_BULL: Sharpe 2.06, WR 62.0%, +0.23%/signal, 474 signals  ← BUY
+//   EXTENDED_BEAR:  Sharpe 9.71, WR 75.0%, +1.74%/signal, 52 signals   ← BUY (rare)
+//   CONFIRMED_BEAR: negative on SPY → SELL with low confidence
+//   EXTENDED_BULL, FLAT: no directional edge → HOLD
+//
+// Two independent layers must agree: EMA stack direction AND RSI alignment.
+// The ribbon gradient shows conviction — full opacity = confirmed,
+// pale = extended/warning.
+
+//@version=6
+
+// REPAINTING FIX 2026-08-06
+// This script previously requested LIVE higher-timeframe series with
+// `lookahead=barmerge.lookahead_on`. On historical bars that returns the
+// completed HTF value -- data that did not exist yet at that moment -- so the
+// indicator looks near-perfect scrolling back and behaves completely
+// differently live. That is why these read as "not showing real data".
+//
+// lookahead_on is only correct when paired with an explicitly CLOSED bar, e.g.
+// request.security(..., 'D', high[1], lookahead=barmerge.lookahead_on), which
+// is what the CPR block in market_guide_suite.pine does. Live series now use
+// the non-repainting default.
+indicator(title='Trend Ribbon Indicator', shorttitle='TrendRibbon+', overlay=true)
+
+// ===== Inputs =====
+res     = input.timeframe(title='Trend Timeframe', defval='D')
+fastLen = input.int(8,  title='Fast EMA')
+midLen  = input.int(20, title='Mid EMA')
+slowLen = input.int(50, title='Slow EMA')
+rsiLen  = input.int(14, title='RSI Length')
+rsiOB   = input.int(65, title='RSI Overbought (extended)')
+rsiOS   = input.int(35, title='RSI Oversold (extended)')
+
+// ===== Higher-timeframe source =====
+htfClose = request.security(syminfo.tickerid, res, close)
+
+// ===== EMAs =====
+fastEMA = request.security(syminfo.tickerid, res, ta.ema(close, fastLen))
+midEMA  = request.security(syminfo.tickerid, res, ta.ema(close, midLen))
+slowEMA = request.security(syminfo.tickerid, res, ta.ema(close, slowLen))
+
+// ===== RSI =====
+rsi = request.security(syminfo.tickerid, res, ta.rsi(close, rsiLen))
+
+// ===== State classification =====
+bullStack = fastEMA > midEMA and midEMA > slowEMA
+bearStack = fastEMA < midEMA and midEMA < slowEMA
+
+confirmedBull = bullStack and rsi > 50 and rsi < rsiOB
+extendedBull  = bullStack and rsi >= rsiOB
+confirmedBear = bearStack and rsi < 50 and rsi > rsiOS
+extendedBear  = bearStack and rsi <= rsiOS
+
+// ===== Bias =====
+buySignal  = confirmedBull or extendedBear
+sellSignal = confirmedBear
+
+// ===== Ribbon visualization =====
+ribbonColor = confirmedBull ? color.new(color.green, 0) :
+              extendedBull  ? color.new(color.lime, 50) :
+              confirmedBear ? color.new(color.maroon, 0) :
+              extendedBear  ? color.new(color.green, 30) :
+              color.new(color.gray, 60)
+
+pf = plot(fastEMA, title='Fast EMA', color=ribbonColor, linewidth=2)
+pm = plot(midEMA,  title='Mid EMA',  color=ribbonColor, linewidth=1)
+ps = plot(slowEMA, title='Slow EMA', color=ribbonColor, linewidth=1)
+fill(pf, ps, color=color.new(ribbonColor, 85), title='Ribbon Fill')
+
+// ===== Entry markers =====
+plotshape(buySignal and confirmedBull,  title='BUY (confirmed bull)', location=location.belowbar, style=shape.triangleup,   color=color.green, size=size.small)
+plotshape(buySignal and extendedBear,   title='BUY (bear bounce)',   location=location.belowbar, style=shape.triangleup,   color=color.lime,  size=size.tiny)
+plotshape(sellSignal,                   title='SELL',                location=location.abovebar, style=shape.triangledown, color=color.red,   size=size.small)
+
+// ===== Status label =====
+var label trendLabel = na
+if barstate.islast
+    label.delete(trendLabel)
+    txt = confirmedBull ? 'CONFIRMED BULL — BUY dips' :
+          extendedBull  ? 'EXTENDED BULL — HOLD (don\'t chase)' :
+          confirmedBear ? 'CONFIRMED BEAR — SELL bounces (low conf)' :
+          extendedBear  ? 'EXTENDED BEAR — BUY bounce' :
+          'FLAT — HOLD'
+    trendLabel := label.new(bar_index, fastEMA, txt, style=label.style_label_down, color=ribbonColor, textcolor=color.white, size=size.small)
+
+alertcondition(buySignal,  title='Ribbon BUY',  message='{{ticker}} Trend Ribbon BUY (confirmed bull or bear bounce)')
+alertcondition(sellSignal, title='Ribbon SELL', message='{{ticker}} Trend Ribbon SELL (confirmed bear)')

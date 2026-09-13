@@ -1,0 +1,219 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// Market Guide Suite — Volatility Regime + Trend Ribbon + VWAP + CPR
+//
+// FOUR overlay tools in ONE indicator slot. TradingView counts scripts loaded,
+// not signals inside them, so this collapses what used to be three separate
+// slots (plus CPR, which had none) into one. On the free tier that leaves the
+// second slot for the Order Flow Volume pane, which is a separate pane anyway.
+//
+// Every section has an on/off toggle. Turn off what you don't want on a given
+// chart rather than loading different scripts.
+//
+//   1. VOLATILITY REGIME  - COMPRESSED / EXPANDED / NORMAL bands. Requires the
+//      ATR ratio AND the BB-width percentile to agree before calling a regime,
+//      so a single noisy measure can't flip it. The 0.85 ATR threshold is the
+//      one validated in the Gamma_Blast backtest (real PF 3.6).
+//
+//   2. TREND RIBBON  - EMA 8/20/50 stack, but only "confirmed" when RSI agrees
+//      with the stack direction and isn't at an extreme. Distinguishes a
+//      healthy trend from a stretched one.
+//
+//   3. VWAP + VOLUME  - session-anchored VWAP with stdev bands (the
+//      institutional fair-value reference) and volume-backed bar colouring.
+//      NEEDS REAL VOLUME: useless on cash/spot indices, which report zero
+//      volume. Use futures (NSE:NIFTY1!) or single stocks.
+//
+//   4. CPR + PIVOTS  - central pivot range and classic pivots from the PRIOR
+//      session. CPR WIDTH is the signal, not the levels: narrow -> expect a
+//      trending day, wide -> expect rotation. Mirrors screeners/levels.py so
+//      the chart and run_session_picks.py agree to the decimal.
+//
+// ---------------------------------------------------------------------------
+// REPAINTING FIX (changed from the original three scripts)
+//
+// The originals fetched higher-timeframe data with `lookahead=barmerge.
+// lookahead_on` on a live series. That makes HISTORICAL bars display the
+// COMPLETED daily value — information that did not exist at the time — so the
+// chart's history flatters itself and you cannot trust what you see when
+// scrolling back.
+//
+// Fixed here: live HTF series use lookahead_off (the non-repainting default).
+// CPR is the one place lookahead_on is correct, because it is paired with a
+// `[1]` offset — requesting the ALREADY-CLOSED prior bar, which is the
+// documented safe idiom and is exactly what CPR is defined on.
+// ---------------------------------------------------------------------------
+
+//@version=6
+indicator(title='Market Guide Suite', shorttitle='Guide', overlay=true, max_labels_count=50)
+
+// ===== Toggles =====
+G_TOG = 'Sections'
+showVol    = input.bool(true,  title='Volatility Regime', group=G_TOG)
+showRibbon = input.bool(true,  title='Trend Ribbon',      group=G_TOG)
+showVWAP   = input.bool(false, title='VWAP + Volume  (needs real volume)', group=G_TOG)
+showCPR    = input.bool(true,  title='CPR + Pivots',      group=G_TOG)
+showLabel  = input.bool(true,  title='Status label',      group=G_TOG)
+
+// ===== Section 1: Volatility Regime =====
+G_VOL = 'Volatility Regime'
+res        = input.timeframe('D',  title='Regime Timeframe',  group=G_VOL)
+bbLen      = input.int(20,         title='BB Length',         group=G_VOL)
+bbMult     = input.float(2.0,      title='BB StdDev Mult',    group=G_VOL)
+atrFastLen = input.int(5,          title='ATR Fast',          group=G_VOL)
+atrSlowLen = input.int(20,         title='ATR Slow',          group=G_VOL)
+compressTh = input.float(0.85,     title='Compression Threshold', group=G_VOL, tooltip='Validated in the Gamma_Blast backtest')
+expandTh   = input.float(1.25,     title='Expansion Threshold',   group=G_VOL)
+pctileLen  = input.int(100,        title='BB Width Percentile Lookback', group=G_VOL)
+
+htfClose = request.security(syminfo.tickerid, res, close, lookahead=barmerge.lookahead_off)
+htfHigh  = request.security(syminfo.tickerid, res, high,  lookahead=barmerge.lookahead_off)
+htfLow   = request.security(syminfo.tickerid, res, low,   lookahead=barmerge.lookahead_off)
+
+basis   = ta.sma(htfClose, bbLen)
+dev     = bbMult * ta.stdev(htfClose, bbLen)
+upperBB = basis + dev
+lowerBB = basis - dev
+bbWidth = (upperBB - lowerBB) / basis
+bbWidthPctile = ta.percentrank(bbWidth, pctileLen)
+
+htfTR    = math.max(htfHigh - htfLow, math.max(math.abs(htfHigh - htfClose[1]), math.abs(htfLow - htfClose[1])))
+atrFast  = ta.rma(htfTR, atrFastLen)
+atrSlow  = ta.rma(htfTR, atrSlowLen)
+atrRatio = atrSlow != 0 ? atrFast / atrSlow : na
+
+isCompressed = showVol and atrRatio < compressTh and bbWidthPctile < 25
+isExpanded   = showVol and atrRatio > expandTh   and bbWidthPctile > 75
+regimeColor  = isCompressed ? color.new(color.blue, 0) : isExpanded ? color.new(color.red, 0) : color.new(color.gray, 0)
+
+u = plot(showVol ? upperBB : na, title='Regime Upper', color=regimeColor, linewidth=1)
+l = plot(showVol ? lowerBB : na, title='Regime Lower', color=regimeColor, linewidth=1)
+fill(u, l, color=color.new(regimeColor, isCompressed ? 85 : isExpanded ? 92 : 95), title='Regime Fill')
+plot(showVol ? basis : na, title='Regime Basis', color=color.new(color.white, 40))
+bgcolor(isCompressed ? color.new(color.blue, 90) : na, title='Compression Highlight')
+
+// ===== Section 2: Trend Ribbon =====
+G_TR = 'Trend Ribbon'
+fastLen = input.int(8,  title='Fast EMA', group=G_TR)
+midLen  = input.int(20, title='Mid EMA',  group=G_TR)
+slowLen = input.int(50, title='Slow EMA', group=G_TR)
+rsiLen  = input.int(14, title='RSI Length', group=G_TR)
+rsiOB   = input.int(70, title='RSI Overbought (extended)', group=G_TR)
+rsiOS   = input.int(30, title='RSI Oversold (extended)',   group=G_TR)
+
+fastEMA = request.security(syminfo.tickerid, res, ta.ema(close, fastLen), lookahead=barmerge.lookahead_off)
+midEMA  = request.security(syminfo.tickerid, res, ta.ema(close, midLen),  lookahead=barmerge.lookahead_off)
+slowEMA = request.security(syminfo.tickerid, res, ta.ema(close, slowLen), lookahead=barmerge.lookahead_off)
+rsiV    = request.security(syminfo.tickerid, res, ta.rsi(close, rsiLen),  lookahead=barmerge.lookahead_off)
+
+bullStack = fastEMA > midEMA and midEMA > slowEMA and htfClose > fastEMA
+bearStack = fastEMA < midEMA and midEMA < slowEMA and htfClose < fastEMA
+
+confirmedBull = showRibbon and bullStack and rsiV > 50 and rsiV < rsiOB
+extendedBull  = showRibbon and bullStack and rsiV >= rsiOB
+confirmedBear = showRibbon and bearStack and rsiV < 50 and rsiV > rsiOS
+extendedBear  = showRibbon and bearStack and rsiV <= rsiOS
+
+ribbonColor = confirmedBull ? color.new(color.green, 0) :
+              extendedBull  ? color.new(color.lime, 0) :
+              confirmedBear ? color.new(color.red, 0) :
+              extendedBear  ? color.new(color.orange, 0) : color.new(color.gray, 30)
+
+pf = plot(showRibbon ? fastEMA : na, title='Fast EMA', color=ribbonColor, linewidth=2)
+pm = plot(showRibbon ? midEMA  : na, title='Mid EMA',  color=ribbonColor, linewidth=1)
+ps = plot(showRibbon ? slowEMA : na, title='Slow EMA', color=ribbonColor, linewidth=1)
+fill(pf, ps, color=color.new(ribbonColor, 85), title='Ribbon Fill')
+
+// ===== Section 3: VWAP + Volume Confirmation =====
+G_VW = 'VWAP + Volume'
+volAvgLen     = input.int(20,    title='Volume Average Length', group=G_VW)
+volStrongMult = input.float(1.5, title='Strong Volume Multiplier', group=G_VW)
+volWeakMult   = input.float(0.7, title='Weak Volume Multiplier',   group=G_VW)
+devMult1      = input.float(1.0, title='Inner Band StdDev', group=G_VW)
+devMult2      = input.float(2.0, title='Outer Band StdDev', group=G_VW)
+
+newSession = ta.change(time('D')) != 0
+var float cumPV  = na
+var float cumV   = na
+var float cumPV2 = na
+cumPV  := newSession ? close * volume            : nz(cumPV[1])  + close * volume
+cumV   := newSession ? volume                    : nz(cumV[1])   + volume
+cumPV2 := newSession ? close * close * volume    : nz(cumPV2[1]) + close * close * volume
+
+vwapV     = cumV > 0 ? cumPV / cumV : na
+variance  = cumV > 0 ? (cumPV2 / cumV) - (vwapV * vwapV) : na
+vwapStdev = math.sqrt(math.max(nz(variance), 0))
+
+plot(showVWAP ? vwapV : na, title='VWAP', color=color.new(color.yellow, 0), linewidth=2)
+vu1 = plot(showVWAP ? vwapV + devMult1 * vwapStdev : na, title='VWAP +1σ', color=color.new(color.gray, 55))
+vl1 = plot(showVWAP ? vwapV - devMult1 * vwapStdev : na, title='VWAP -1σ', color=color.new(color.gray, 55))
+fill(vu1, vl1, color=color.new(color.yellow, 94), title='VWAP Inner')
+plot(showVWAP ? vwapV + devMult2 * vwapStdev : na, title='VWAP +2σ', color=color.new(color.gray, 75))
+plot(showVWAP ? vwapV - devMult2 * vwapStdev : na, title='VWAP -2σ', color=color.new(color.gray, 75))
+
+avgVol      = ta.sma(volume, volAvgLen)
+strongVol   = volume > avgVol * volStrongMult
+weakVol     = volume < avgVol * volWeakMult
+barcolor(showVWAP ? (strongVol ? (close > open ? color.new(color.teal, 0) : color.new(color.red, 0))
+                    : weakVol ? color.new(color.gray, 60) : na) : na, title='Volume Confirmation')
+
+// ===== Section 4: CPR + Pivots =====
+// lookahead_on IS correct here: paired with [1] it requests the already-closed
+// prior session, which is what CPR is defined on. No repainting.
+G_CPR = 'CPR + Pivots'
+showR2S2  = input.bool(true, title='Show R2 / S2', group=G_CPR)
+cprNarrow = input.float(0.25, title='Narrow CPR threshold (% of pivot)', group=G_CPR, tooltip='Below this the CPR is coiled -> expect a trending day')
+
+pdH = request.security(syminfo.tickerid, 'D', high[1],  lookahead=barmerge.lookahead_on)
+pdL = request.security(syminfo.tickerid, 'D', low[1],   lookahead=barmerge.lookahead_on)
+pdC = request.security(syminfo.tickerid, 'D', close[1], lookahead=barmerge.lookahead_on)
+
+pivot   = (pdH + pdL + pdC) / 3
+bcRaw   = (pdH + pdL) / 2
+tcRaw   = 2 * pivot - bcRaw
+tc      = math.max(tcRaw, bcRaw)     // TC/BC invert with where the close sat
+bc      = math.min(tcRaw, bcRaw)
+cprWidthPct = pivot != 0 ? (tc - bc) / pivot * 100 : na
+cprIsNarrow = cprWidthPct < cprNarrow
+
+pdRange = pdH - pdL
+r1 = 2 * pivot - pdL
+s1 = 2 * pivot - pdH
+r2 = pivot + pdRange
+s2 = pivot - pdRange
+
+cprCol = cprIsNarrow ? color.new(color.orange, 0) : color.new(color.purple, 20)
+ptc = plot(showCPR ? tc : na,    title='CPR TC',    color=cprCol, style=plot.style_linebr)
+pbc = plot(showCPR ? bc : na,    title='CPR BC',    color=cprCol, style=plot.style_linebr)
+fill(ptc, pbc, color=color.new(cprCol, 80), title='CPR Fill')
+plot(showCPR ? pivot : na, title='Pivot', color=color.new(color.white, 0), style=plot.style_linebr, linewidth=2)
+
+plot(showCPR ? r1 : na, title='R1', color=color.new(color.red, 40),   style=plot.style_linebr)
+plot(showCPR ? s1 : na, title='S1', color=color.new(color.green, 40), style=plot.style_linebr)
+plot(showCPR and showR2S2 ? r2 : na, title='R2', color=color.new(color.red, 65),   style=plot.style_linebr)
+plot(showCPR and showR2S2 ? s2 : na, title='S2', color=color.new(color.green, 65), style=plot.style_linebr)
+
+// ===== Combined status label =====
+var label statusLabel = na
+if barstate.islast and showLabel
+    label.delete(statusLabel)
+    string txt = ''
+    if showVol
+        txt += (isCompressed ? 'VOL: COMPRESSED (coiled)' : isExpanded ? 'VOL: EXPANDED' : 'VOL: normal') + '\n'
+    if showRibbon
+        txt += 'TREND: ' + (confirmedBull ? 'STRONG UP' : extendedBull ? 'UP (extended)' :
+               confirmedBear ? 'STRONG DOWN' : extendedBear ? 'DOWN (extended)' : 'no clear trend') + '\n'
+    if showCPR and not na(cprWidthPct)
+        txt += 'CPR: ' + str.tostring(cprWidthPct, '#.##') + '% ' +
+               (cprIsNarrow ? '(narrow → trend day)' : '(wide → range day)') + '\n'
+    if showVWAP and not na(vwapV)
+        txt += 'vs VWAP: ' + str.tostring((close - vwapV) / vwapV * 100, '#.##') + '%'
+    if str.length(txt) > 0
+        statusLabel := label.new(bar_index, high, txt, style=label.style_label_down,
+                                 color=color.new(color.black, 20), textcolor=color.white, size=size.small)
+
+// ===== Alerts =====
+alertcondition(isCompressed and not isCompressed[1], title='Entered Compression', message='Volatility entered COMPRESSION on {{ticker}} — watch for breakout, premium is cheap')
+alertcondition(isExpanded and not isExpanded[1],     title='Entered Expansion',   message='Volatility entered EXPANSION on {{ticker}} — already moving, careful chasing')
+alertcondition(confirmedBull and not confirmedBull[1], title='Confirmed Uptrend',   message='{{ticker}} entered a confirmed uptrend (EMA stack + RSI aligned)')
+alertcondition(confirmedBear and not confirmedBear[1], title='Confirmed Downtrend', message='{{ticker}} entered a confirmed downtrend (EMA stack + RSI aligned)')
+alertcondition(cprIsNarrow and not cprIsNarrow[1],     title='Narrow CPR',          message='{{ticker}} has a narrow CPR today — expect a trending session')
