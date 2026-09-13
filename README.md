@@ -10,20 +10,31 @@ here I wrote myself.
 
 ## Structure
 
-- **`course-work/`** — working through an algorithmic trading course
-  (financial data analysis, strategy definition & testing, ML applications,
-  full trading strategies, and IBKR/Oanda/Zerodha broker implementations),
-  roughly in the order I learned it.
-- **`quant-math/`** — stochastic processes and option pricing from first
-  principles: Black-Scholes, Heston via FFT, Brownian motion / GBM
-  simulation, a Markov chain implementation, a volatility dashboard.
-- **`strategies/`** — standalone strategy implementations outside the course
-  structure (SMA crossover, trend-following).
+- **`stochastic-processes-and-pricing/`** — Black-Scholes, Heston via FFT,
+  Brownian motion / GBM simulation, a Markov chain implementation, Monte
+  Carlo pricing, a volatility dashboard.
+- **`backtesting-frameworks/`** — iterative and vectorized backtester
+  classes (SMA, mean-reversion, contrarian, ML-based), each subfolder a
+  later, more refined pass at the same ideas as I learned more.
+- **`machine-learning-for-trading/`** — a DNN model for return prediction,
+  plus regression/classification and ML-backtesting notebooks.
+- **`broker-integrations/`** — real broker API implementations: IBKR,
+  Oanda, Zerodha.
+- **`financial-data-analysis/`** — time-series and financial data analysis
+  exercises and lecture notebooks.
+- **`strategies/`** — standalone strategy implementations (SMA crossover,
+  trend-following, a Schrödinger-inspired strategy, portfolio management,
+  real-time data handling).
+- **`algorithmic-trading-scripts/`** — earlier, larger standalone scripts.
 - **`pine-indicators/`** — TradingView Pine Script indicators.
+
+Some concepts (e.g. SMA/mean-reversion backtesters) appear more than once
+under `backtesting-frameworks/` — these are genuinely different passes at
+the same idea made at different points while learning, kept side by side
+rather than collapsed into one "final" version.
 
 ## Going forward
 
 Starting September 2026, this repo grows at roughly one new script or
 implementation a day — each new probability/statistics or math concept I
-study gets turned into real, working code here, not just notes. See
-`quant-math/` and `strategies/` for where new work lands.
+study gets turned into real, working code here, not just notes.
