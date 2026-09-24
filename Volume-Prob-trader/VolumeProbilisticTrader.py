@@ -27,7 +27,30 @@ class VolumeProbabilsticTrader():
     return "VolumeProbabilisticTrader(symbol = {}, start = {}, end = {})".format(self.symbol, self.start, self.end)
 
   def get_live_data(self):
-    self.live_ticker_data = self.market_data.fetch_ticker_data()
+    raw_data = self.market_data.fetch_ticker_data()
+    base_df = pd.DataFrame(list(raw_data))
+    if base_df.empty: 
+      return pd.DataFrame() 
+
+    def extract_trades(row_content): 
+      if isinstance(row_content, list) and len(row_content) > 0: 
+        event_obj = row_content[0] 
+        if isinstance(event_obj, dict): 
+          return event_obj.get("trades", [])
+      return []
+
+    base_df["extracted_list"] = base_df.iloc[:, 2].apply(extract_trades) 
+    df_exploded = base_df.explode("extracted_list") 
+    df_flat = pd.json_normalize(df_exploded["extracted_list"]) 
+    if df_flat.empty: 
+      return df_flat
+
+    df_flat['time'] = pd.to_datetime(df_flat['time'])
+    df_flat['price'] = pd.to_numeric(df_flat['price'], errors='coerce')
+    df_flat['size'] = pd.to_numeric(df_flat['size'], errors='coerce')
+    
+    self.live_ticker_data = df_flat.sort_values('time').reset_index(drop=True)
+    
     self.live_ticker_data = pd.DataFrame(list(self.live_ticker_data))
     print(self.live_ticker_data)
     return self.live_ticker_data
