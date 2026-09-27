@@ -5,7 +5,9 @@
 Mihir's personal quant/math learning portfolio — see `README.md`. This is
 being built as evidence of his own skill for a Summer 2027 internship
 application (Sweden), specifically as the "I can implement things myself"
-counterpart to his other, AI-assisted `Algorithmic_trading_projects` repo.
+counterpart to his other, AI-assisted `Algorithmic_trading_projects` repo. 
+There also is a trading terminal Mihir Uses entirely, homemade with highly advanced and niche data. 
+
 
 ## The one rule that matters here
 
