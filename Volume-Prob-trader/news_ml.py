@@ -17,7 +17,7 @@ class news_ml():
         print(".")
 
 if __name__ == "__main__": 
-    news = news_ml("BTC-USD") 
+    news = news_ml("BTC-USD")  
     news.fetch_news()
 
 
