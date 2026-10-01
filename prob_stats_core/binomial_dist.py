@@ -1,6 +1,6 @@
 import numpy as np  
 import math 
-
+import matplotlib.pyplot as plt
 
 # Bionomial distributions have 4 requirements which can be remembered with BINS
 # B = Binary outcomes, I = Independent trials, N = "N" trails, S = Same p per trial 
@@ -34,7 +34,35 @@ class binomial_dist():
 
     def compute_mu_std(self): 
         print("..")
+        self.mean = self.n * self.p 
+        self.std = math.sqrt(self.n * self.p * (1-self.p))
+        print(f"Mean: {self.mean} | Standard deviation:{self.std}")
         # we will have to calculate mean and standard deviation for a binomial distribution 
+    
+    def plot_chart(self): 
+        x_values = list(range(self.n + 1))
 
-test = binomial_dist(n=5, p=0.5, k=3)
+        # Just recalculatge quickly to avoid that bug
+        y_values = []
+        for x in x_values:
+            t1 = math.factorial(self.n) / (math.factorial(self.n - x) * math.factorial(x))
+            t2 = (self.p) ** x * (1 - self.p) ** (self.n - x)
+            y_values.append(t1 * t2)
+            
+        colors = ['red' if x == self.k else "#5496c5" for x in x_values] 
+        plt.figure(figsize=(10, 5))
+        plt.bar(x_values, y_values, color=colors, width=0.8)
+        plt.title(f"Binomial Distribution (n={self.n}, p={self.p}) | Highlighting k={self.k}")
+        plt.xlabel("Number of Successes (x)")
+        plt.ylabel("Probability P(x)")
+        plt.grid(axis='y', alpha=0.3)
+        plt.show()
+
+
+
+
+
+test = binomial_dist(n=100, p=0.5, k=50)
 print(test.compute_binomial()) 
+print(test.compute_mu_std()) 
+test.plot_chart()
