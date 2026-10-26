@@ -18,8 +18,7 @@ here I wrote myself.
   later, more refined pass at the same ideas as I learned more.
 - **`machine-learning-for-trading/`** — a DNN model for return prediction,
   plus regression/classification and ML-backtesting notebooks.
-- **`broker-integrations/`** — real broker API implementations: IBKR,
-  Oanda, Zerodha.
+- **`broker-integrations/`** — broker API implementations: IBKR and Oanda.
 - **`financial-data-analysis/`** — time-series and financial data analysis
   exercises and lecture notebooks.
 - **`strategies/`** — standalone strategy implementations (SMA crossover,
@@ -32,9 +31,3 @@ Some concepts (e.g. SMA/mean-reversion backtesters) appear more than once
 under `backtesting-frameworks/` — these are genuinely different passes at
 the same idea made at different points while learning, kept side by side
 rather than collapsed into one "final" version.
-
-## Going forward
-
-Starting September 2026, this repo grows at roughly one new script or
-implementation a day — each new probability/statistics or math concept I
-study gets turned into real, working code here, not just notes.
