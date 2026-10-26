@@ -11,8 +11,7 @@ here I wrote myself.
 ## Structure
 
 - **`stochastic-processes-and-pricing/`** — Black-Scholes, Heston via FFT,
-  Brownian motion / GBM simulation, a Markov chain implementation, Monte
-  Carlo pricing, a volatility dashboard.
+  Brownian motion / GBM simulation, Monte Carlo pricing, a volatility dashboard.
 - **`backtesting-frameworks/`** — iterative and vectorized backtester
   classes (SMA, mean-reversion, contrarian, ML-based), each subfolder a
   later, more refined pass at the same ideas as I learned more.
@@ -24,7 +23,7 @@ here I wrote myself.
 - **`strategies/`** — standalone strategy implementations (SMA crossover,
   trend-following, a Schrödinger-inspired strategy, portfolio management,
   real-time data handling).
-- **`algorithmic-trading-scripts/`** — earlier, larger standalone scripts.
+- **`algorithmic-trading-notes/`** — annotated early trading scripts, mostly commentary.
 - **`pine-indicators/`** — TradingView Pine Script indicators.
 
 Some concepts (e.g. SMA/mean-reversion backtesters) appear more than once
